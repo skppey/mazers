@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Mazers</title>
+<style>
+body { margin:0; overflow:hidden; background:#111; font-family:Arial;}
+canvas { display:block; }
+#pauseMenu { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+ background:rgba(0,0,0,0.9); padding:20px 40px; border-radius:10px; border:2px solid #fff;
+ color:white; text-align:center; display:none;}
+#resumeBtn { background:limegreen; color:white; border:none; padding:10px 20px; font-size:1.2em; border-radius:5px; cursor:pointer;}
+#resumeBtn:hover { background:green;}
+#joystick { position:absolute; bottom:20px; left:80px; width:100px; height:100px; background: rgba(255,255,255,0.1); border:2px solid white; border-radius:50%; touch-action:none; display:none;}
+#stick { position:absolute; width:50px; height:50px; background: rgba(255,255,255,0.3); border-radius:50%; left:25px; top:25px; touch-action:none;}
+</style>
+</head>
+<body>
+
+<canvas id="game"></canvas>
+<div id="pauseMenu">
+<h1>Mazers Paused</h1>
+<button id="resumeBtn">Resume to Game</button>
+</div>
+
+<div id="joystick">
+<div id="stick"></div>
+</div>
+
+<script>
+const canvas=document.getElementById("game");
+const ctx=canvas.getContext("2d");
+const pauseMenu=document.getElementById("pauseMenu");
+const resumeBtn=document.getElementById("resumeBtn");
+const joystick=document.getElementById("joystick");
+const stick=document.getElementById("stick");
+
+let TILE=20;
+let ROWS, COLS;
+let maze, player, trophy;
+let paused=false, moveDir={x:0,y:0};
+let keys={}, isTouchDevice=('ontouchstart' in window);
+let lastMoveTime=0, moveDelay=100;
+
+// --- Resize Canvas Fullscreen ---
+function resizeCanvas(){
+  canvas.width=window.innerWidth;
+  canvas.height=window.innerHeight;
+  COLS=Math.floor(canvas.width/TILE);
+  ROWS=Math.floor(canvas.height/TILE);
+  newMaze();
+}
+window.addEventListener('resize',resizeCanvas);
+resizeCanvas(); // initial
+
+// --- Maze ---
+function generateMaze(rows, cols){
+  let maze=Array.from({length:rows},()=>Array(cols).fill(1));
+  function carve(r,c){
+    maze[r][c]=0;
+    const dirs=[[0,2],[0,-2],[2,0],[-2,0]];
+    shuffle(dirs);
+    for(let [dr,dc] of dirs){
+      let nr=r+dr,nc=c+dc;
+      if(nr>0&&nr<rows-1&&nc>0&&nc<cols-1&&maze[nr][nc]===1){
+        maze[r+dr/2][c+dc/2]=0;
+        carve(nr,nc);
+      }
+    }
+  }
+  carve(1,1);
+  return maze;
+}
+function shuffle(arr){for(let i=arr.length-1;i>0;i--){let j=Math.floor(Math.random()*(i+1)); [arr[i],arr[j]]=[arr[j],arr[i]];}}
+
+// --- Setup ---
+function newMaze(){
+  if(!ROWS||!COLS) return;
+  maze=generateMaze(ROWS,COLS);
+  player={r:1,c:1,x:1*TILE,y:1*TILE,moving:false,targetX:20,targetY:20};
+  while(true){
+    let r=Math.floor(Math.random()*ROWS);
+    let c=Math.floor(Math.random()*COLS);
+    if(maze[r][c]===0 && (r!==player.r||c!==player.c)){ trophy={r,c}; break;}
+  }
+}
+
+// --- Pause ---
+document.addEventListener("keydown",e=>{if(e.key==="Escape") togglePause();});
+resumeBtn.addEventListener("click",()=>togglePause());
+function togglePause(){ paused=!paused; pauseMenu.style.display = paused?"block":"none"; }
+
+// --- Movement ---
+function tryMove(dr,dc){ if(player.moving) return; let nr=player.r+dr,nc=player.c+dc; if(maze[nr]&&maze[nr][nc]===0){ player.r=nr; player.c=nc; player.targetX=nc*TILE; player.targetY=nr*TILE; player.moving=true; } }
+
+function update(){
+  const now=Date.now();
+  if(!player.moving){
+    if(isTouchDevice){
+      if((moveDir.x!==0||moveDir.y!==0)&&now-lastMoveTime>moveDelay){
+        if(moveDir.y<-0.3) tryMove(-1,0);
+        else if(moveDir.y>0.3) tryMove(1,0);
+        if(moveDir.x<-0.3) tryMove(0,-1);
+        else if(moveDir.x>0.3) tryMove(0,1);
+        lastMoveTime=now;
+      }
+    }else{
+      if(keys["w"]||keys["arrowup"]) tryMove(-1,0);
+      if(keys["s"]||keys["arrowdown"]) tryMove(1,0);
+      if(keys["a"]||keys["arrowleft"]) tryMove(0,-1);
+      if(keys["d"]||keys["arrowright"]) tryMove(0,1);
+    }
+  }else{
+    let speed=4;
+    if(player.x<player.targetX) player.x=Math.min(player.x+speed,player.targetX);
+    if(player.x>player.targetX) player.x=Math.max(player.x-speed,player.targetX);
+    if(player.y<player.targetY) player.y=Math.min(player.y+speed,player.targetY);
+    if(player.y>player.targetY) player.y=Math.max(player.y-speed,player.targetY);
+    if(player.x===player.targetX&&player.y===player.targetY) player.moving=false;
+  }
+  if(player.r===trophy.r&&player.c===trophy.c&&!player.moving) newMaze();
+}
+
+// --- Keyboard ---
+if(!isTouchDevice){
+  document.addEventListener("keydown",e=>{ keys[e.key.toLowerCase()]=true; });
+  document.addEventListener("keyup",e=>{ keys[e.key.toLowerCase()]=false; });
+}
+
+// --- Joystick ---
+if(isTouchDevice){
+  joystick.style.display="block";
+  let origin={x:joystick.offsetLeft+50, y:joystick.offsetTop+50}, dragging=false;
+  joystick.addEventListener("touchstart",()=>dragging=true);
+  joystick.addEventListener("touchend",()=>{ dragging=false; moveDir={x:0,y:0}; stick.style.left="25px"; stick.style.top="25px"; });
+  joystick.addEventListener("touchmove",e=>{
+    e.preventDefault();
+    if(!dragging) return;
+    let t=e.touches[0], dx=t.clientX-origin.x, dy=t.clientY-origin.y;
+    let dist=Math.min(Math.sqrt(dx*dx+dy*dy),50), angle=Math.atan2(dy,dx);
+    let nx=Math.cos(angle)*dist, ny=Math.sin(angle)*dist;
+    stick.style.left=(50+nx-25)+"px";
+    stick.style.top=(50+ny-25)+"px";
+    moveDir={x:nx/50,y:ny/50};
+  },{passive:false});
+}
+
+// --- Draw ---
+function draw(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  for(let r=0;r<ROWS;r++){
+    for(let c=0;c<COLS;c++){
+      if(maze[r][c]===1){ ctx.fillStyle="#228B22"; ctx.fillRect(c*TILE,r*TILE,TILE,TILE);}
+      else{ ctx.fillStyle="#5C4033"; ctx.fillRect(c*TILE,r*TILE,TILE,TILE); ctx.fillStyle="rgba(0,0,0,0.2)"; ctx.fillRect(c*TILE+TILE*0.5,r*TILE+TILE*0.5,TILE*0.5,TILE*0.5);}
+    }
+  }
+  ctx.fillStyle="gold"; ctx.fillRect(trophy.c*TILE+2,trophy.r*TILE+2,TILE-4,TILE-4);
+  ctx.fillStyle="lime"; ctx.beginPath(); ctx.arc(player.x+TILE/2,player.y+TILE/2,TILE/2-2,0,Math.PI*2); ctx.fill();
+}
+
+// --- Loop ---
+function loop(){ if(!paused){ update(); draw(); } requestAnimationFrame(loop);}
+loop();
+</script>
+</body>
+</html>
